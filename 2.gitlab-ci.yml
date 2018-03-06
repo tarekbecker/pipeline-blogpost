@@ -1,0 +1,65 @@
+# define a default docker image for all jobs
+image: node:6.10
+
+variables:
+    # replace this with YOUR custom bucket name
+    S3_BUCKET: pipeline-demo-tarekbecker
+    AWS_DEFAULT_REGION: eu-central-1
+
+stages:
+    - install # install all npm dependencies
+    - test    # execute unit tests
+    - package # upload source code to S3
+    - deploy  # stage for deploying to production
+
+npmInstall:
+    stage: install
+    script:
+        - npm install --production
+    # artifacts describe the result of the stage
+    # that can be used in consecutive stages
+    artifacts:
+        untracked: true
+
+linting:
+    stage: test
+    script:
+        # install standardjs for linting
+        - npm install -g standard
+        - npm run-script lint
+
+unittesting:
+    stage: test
+    # use the artifcats of the 'npmInstall' job
+    dependencies:
+        - npmInstall
+    script:
+        # install dev-dependency mocha
+        - npm install
+        - npm test
+
+packageApp:
+    stage: package
+    image: tarekbecker/awscli
+    # use the artifcats of the 'npmInstall' job
+    dependencies:
+        - npmInstall
+    script:
+        # package uploads the source code to S3 and creates a new
+        # template file with a reference to the code in S3
+        - aws cloudformation package --template template.yml --s3-bucket $S3_BUCKET --output-template template-export.yml
+    artifacts:
+        paths:
+            # the modified template is the result of this stage
+            - ./template-export.yml
+
+
+deployProd:
+    stage: deploy
+    image: tarekbecker/awscli
+    dependencies:
+        - packageApp
+    script:
+        # use the template-export file to deploy the stack
+        # the cloud formation stack name is prod for our stack
+        - aws cloudformation deploy --template-file template-export.yml --stack-name demo-pipeline-prod-stack --capabilities CAPABILITY_IAM

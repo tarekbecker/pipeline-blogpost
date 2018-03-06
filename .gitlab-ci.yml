@@ -1,0 +1,33 @@
+# define a default docker image for all jobs
+image: node:6.10
+
+stages:
+    - install # install all npm dependencies
+    - test    # execute unit tests
+
+npmInstall:
+    stage: install
+    script:
+        - npm install --production
+    # artifacts describe the result of the stage
+    # that can be used in consecutive stages
+    artifacts:
+        untracked: true
+
+linting:
+    stage: test
+    script:
+        # install standardjs for linting
+        - npm install -g standard
+        - npm run-script lint
+
+unittesting:
+    stage: test
+    # use the artifcats of the 'npmInstall' job
+    dependencies:
+        - npmInstall
+    script:
+        # install dev-dependency mocha
+        - npm install
+        - npm test
+

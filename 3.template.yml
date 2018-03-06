@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion : '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Pipeline example serverless application
+
+Outputs:
+  APIRoot:
+    Description: Url of the API
+    Export:
+      # Every export needs an account wide unique name
+      Name:
+        'Fn::Sub': '${AWS::StackName}-apiroot'
+    Value:
+      'Fn::Sub': 'https://${RestAPI}.execute-api.${AWS::Region}.amazonaws.com/prod'
+
+Resources:
+  HelloWorldLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      CodeUri: .
+      Runtime: nodejs6.10
+      Timeout: 3
+      Role: !GetAtt HelloWorldLambdaRole.Arn
+      Events:
+        RootGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestAPI
+            Path: /
+            Method: GET
+      # for gradual deployment, we need an alias. We just call it live
+      AutoPublishAlias: live
+      DeploymentPreference:
+        # Shift 10 percent of the traffic every minute
+        Type: Linear10PercentEvery1Minute
+        Alarms:
+            # larm that aborts the deployment
+            # alarm is created below!
+            - !Ref HelloWorldLambdaAlarm
+  RestAPI:
+    Type: 'AWS::Serverless::Api'
+    Properties:
+      StageName: prod
+      DefinitionBody:
+        swagger: '2.0'
+        info:
+          title: !Sub '${AWS::StackName}-API'
+        basePath: /prod
+        schemes:
+          - https
+        paths:
+          /:
+            get:
+              responses: {}
+              x-amazon-apigateway-integration:
+                # Append alias live to the ARN of the lambda
+                uri: !Sub >-
+                  arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${HelloWorldLambda.Arn}:live/invocations
+                passthroughBehavior: when_no_match
+                httpMethod: POST
+                type: aws_proxy
+  HelloWorldLambdaRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+        Version: 2012-10-17
+      Path: /
+      ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+    Type: 'AWS::IAM::Role'
+  # This alarm monitors the errors of the HelloWorld lambda function
+  HelloWorldLambdaAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: Errors of Hello World function (${AWS::StackName})
+      AlarmName: !Sub 'Hello World Errors ${AWS::StackName}'
+      # if more than zero (threshold below) errors occur, change state
+      # to alarm
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      # monitor last five minutes
+      Period: 300
+      Statistic: Sum
+      Threshold: 0
+      # if there was no invocation, the alarm state is OK
+      TreatMissingData: notBreaching
+
